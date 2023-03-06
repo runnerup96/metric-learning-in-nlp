@@ -1,21 +1,52 @@
+import math
 import torch
-from typing import Callable, Any, Dict
 import pandas as pd
 from tqdm import tqdm
-from IPython.display import clear_output
 import matplotlib.pyplot as plt
-import numpy as np
+from IPython.display import clear_output
+from typing import Callable, Any, Dict, List, Optional
 
-
-from src.losses.losses import l2_distance
-from src.losses.losses import compute_triplet_loss
-from src.losses.losses import compute_silhouette_score
+from losses.losses import l2_distance
+from losses.losses import compute_triplet_loss
+from losses.losses import compute_silhouette_score
 
 DELTA = 0.1
-LAYERS2FREEZE = 9
-EPOCH_STEPS = 256
-VAL_STEPS = 32
 BATCH_SIZE = 8
+VAL_STEPS = 32
+EPOCH_STEPS = 256
+
+
+def plot_metrics(
+    metrics: Dict[str, List[float]],
+    ewm: Optional[bool] = True,
+    ncols: Optional[int] = 2,
+    figsize: Optional[int] = (16, 12),
+):
+    """Plot metrics using provided mapping
+
+    Args:
+        metrics (Dict[str, List[float]]): mapping from name to its values
+        ewm (Optional[bool], optional): whether to use moving average. Defaults to True.
+        ncols (Optional[int], optional): number of columns. Defaults to 2.
+        figsize (Optional[int], optional): size of result plt figure. Defaults to (16, 12).
+    """
+    ewma = lambda x, span: pd.DataFrame({"x": x})["x"].ewm(span=span).mean().values
+    nrows = math.ceil(len(metrics) / ncols)
+    fig, _axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+    axs = [item for sublist in _axs for item in sublist] if nrows > 1 else _axs
+    for name, ax in zip(metrics.keys(), axs):
+        ax.scatter(
+            range(len(metrics[name])),
+            metrics[name],
+            alpha=0.1,
+        )
+        ax.plot(ewma(metrics[name], span=10) if ewm else metrics[name])
+        ax.set_title(name)
+
+    for ax in axs[len(metrics) :]:
+        ax.axis("off")
+
+    fig.show()
 
 
 def fit(
@@ -39,7 +70,7 @@ def fit(
 
             # training
             epoch_train_loss = 0
-            model.enable_some_bert_layers_training(layers2freeze=LAYERS2FREEZE)
+            model.enable_bert_layers_training()
 
             pbar = tqdm(
                 total=EPOCH_STEPS, desc=f"Training, epoch {epoch}/{dataset_passes}"
@@ -77,27 +108,6 @@ def fit(
             )
             train_silouhette_history_array.append(epoch_train_silouhette)
 
-            clear_output(True)
-            plt.figure(figsize=[28, 10])
-
-            # loss plot
-            plt.subplot(2, 2, 1), plt.title("train triplet loss"), plt.grid()
-            plt.scatter(
-                np.arange(len(train_loss_history_array)),
-                train_loss_history_array,
-                alpha=0.1,
-            )
-            plt.plot(ewma(train_loss_history_array, span=10))
-
-            # silouhette plot
-            plt.subplot(2, 2, 2), plt.title("train silouhette metric"), plt.grid()
-            plt.scatter(
-                np.arange(len(train_silouhette_history_array)),
-                train_silouhette_history_array,
-                alpha=0.1,
-            )
-            plt.plot(ewma(train_silouhette_history_array, span=10))
-
             # check gradient flow
             layers_list, average_grads_list = [], []
             for layer_name, params in model.named_parameters():
@@ -105,16 +115,14 @@ def fit(
                     layers_list.append(layer_name)
                     average_grads_list.append(params.grad.abs().mean().item())
 
-            plt.subplot(2, 2, 3)
-            plt.title("training average grads per sample pass")
-            plt.grid()
-            plt.scatter(layers_list, average_grads_list, alpha=0.1)
-            plt.xticks(
-                range(0, len(average_grads_list), 1), layers_list, rotation="vertical"
+            plot_metrics(
+                {
+                    "train triplet loss": train_loss_history_array,
+                    "train silouhette metric": train_silouhette_history_array,
+                    "training average grads per sample pass": average_grads_list,
+                },
+                figsize=(10, 8),
             )
-            plt.plot(ewma(average_grads_list, span=10))
-            plt.show()
-            print("Train silouhette value: ", train_silouhette_history_array[-1])
 
             # disable bert training for all layers
             model.disable_bert_training()
@@ -156,22 +164,13 @@ def fit(
             val_recall_history_array.append(epoch_val_recall / VAL_STEPS)
 
             clear_output(True)
-            plt.figure(figsize=[20, 6])
-            plt.subplot(1, 2, 1), plt.title("val triplet loss"), plt.grid()
-            plt.scatter(
-                np.arange(len(val_loss_history_array)),
-                val_loss_history_array,
-                alpha=0.1,
+            plot_metrics(
+                {
+                    "val triplet loss": val_loss_history_array,
+                    "Val Recall(one point - recall per epoch)": val_recall_history_array,
+                },
+                figsize=(8, 3),
             )
-            plt.plot(ewma(val_loss_history_array, span=10))
-
-            # how many samples did we correctly arranged in space currently
-            plt.subplot(1, 2, 2), plt.title(
-                "Val Recall(one point - recall per epoch)"
-            ), plt.grid()
-            dev_time = np.arange(1, len(val_recall_history_array) + 1)
-            plt.scatter(dev_time, val_recall_history_array, alpha=0.1)
-            plt.plot(dev_time, ewma(val_recall_history_array, span=10))
             plt.show()
 
     except KeyboardInterrupt:

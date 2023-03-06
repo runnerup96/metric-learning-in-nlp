@@ -1,6 +1,6 @@
 import torch
-from typing import Any, List, Tuple
 from tqdm import tqdm
+from typing import Any, List, Tuple
 
 
 def create_tranformer_input(

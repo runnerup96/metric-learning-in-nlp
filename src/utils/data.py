@@ -1,7 +1,7 @@
-import pandas as pd
 import json
-from sklearn.model_selection import train_test_split
+import pandas as pd
 from typing import Dict
+from sklearn.model_selection import train_test_split
 
 
 def load_dataframe(path: str) -> pd.DataFrame:

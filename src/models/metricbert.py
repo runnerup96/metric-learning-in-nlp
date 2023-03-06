@@ -1,42 +1,40 @@
-from copy import deepcopy
-from typing import List, Dict
 import torch
-import pytorch_lightning as pl
+from typing import Dict
+from copy import deepcopy
 
 
-class MetricBERT(torch.nn.Module):
-    def __init__(self, bert_model: torch.nn.Module):
-        super().__init__()
-        self.bert = deepcopy(bert_model)
+class TransformerBasedEncoder(torch.nn.Module):
+    def __init__(self, bert, n_last_layers2train):
+        super(TransformerBasedEncoder, self).__init__()
+        self.bert = deepcopy(bert)
+        self.disable_bert_training()
 
-    def _disable_layers_training(self, layers: List[torch.nn.Module]) -> None:
-        for layer in layers:
-            for param in layer.parameters():
-                param.requires_grad = False
+        if 1 <= n_last_layers2train < len(self.bert.encoder.layer):
+            self.modules2train = [
+                *self.bert.encoder.layer[-n_last_layers2train:],
+                self.bert.pooler,
+            ]
+        elif n_last_layers2train == len(self.bert.encoder.layer):
+            self.modules2train = [
+                *self.bert.encoder.layer[-n_last_layers2train:],
+                self.bert.pooler,
+                self.bert.embeddings,
+            ]
+        elif n_last_layers2train == 0:
+            self.modules2train = [self.bert.pooler]
+        elif n_last_layers2train == -1:
+            self.modules2train = []
+        else:
+            raise ValueError("Wrong params amount!")
 
-    def _enable_layers_training(self, layers: List[torch.nn.Module]) -> None:
-        for layer in layers:
-            for param in layer.parameters():
+    def disable_bert_training(self):
+        for module in self.bert.parameters():
+            module.requires_grad = False
+
+    def enable_bert_layers_training(self):
+        for module in self.modules2train:
+            for param in module.parameters():
                 param.requires_grad = True
-
-    def disable_bert_training(self) -> None:
-        """Disable gradients for the entire model"""
-        self._disable_layers_training(self.bert.encoder.layer)
-
-    def enable_some_bert_layers_training(self, layers2freeze: int) -> None:
-        """Disable gradients for the first layers2freeze layers
-
-        Args:
-            layers2freeze (int): number of first layers to freeze
-        """
-        layers4freeze = [
-            *[self.bert.encoder.layer[:layers2freeze]] + [self.bert.embeddings]
-        ]
-        layers2train = [
-            *self.bert.encoder.layer[layers2freeze - len(self.bert.encoder.layer) :]
-        ]
-        self._disable_layers_training(layers4freeze)
-        self._enable_layers_training(layers2train)
 
     def forward(
         self,

@@ -1,6 +1,6 @@
-from typing import List, Union
 import faiss
 import numpy as np
+from typing import List, Union
 
 
 class KnnIndex:

@@ -1,7 +1,7 @@
-from typing import Dict, List, Optional
-import random
 import torch
+import random
 import numpy as np
+from typing import Dict, List, Optional
 
 
 class TripletGenerator:

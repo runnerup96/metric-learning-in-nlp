@@ -1,9 +1,9 @@
 import torch
-import numpy as np
-from typing import Callable, Dict
-import sklearn
 import random
+import sklearn
+import numpy as np
 from tqdm import tqdm
+from typing import Callable, Dict
 
 
 def l2_distance(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
