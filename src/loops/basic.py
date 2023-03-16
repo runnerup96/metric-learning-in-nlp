@@ -7,13 +7,10 @@ from IPython.display import clear_output
 from typing import Callable, Any, Dict, List, Optional
 
 from losses.losses import l2_distance
-from losses.losses import compute_triplet_loss
+from losses.losses import compute_triplet_loss, hard_triplet_loss
 from losses.losses import compute_silhouette_score
 
 DELTA = 0.1
-BATCH_SIZE = 8
-VAL_STEPS = 32
-EPOCH_STEPS = 256
 
 
 def plot_metrics(
@@ -51,7 +48,10 @@ def plot_metrics(
 
 def fit(
     dataset_passes: int,
-    device: str,
+    train_epoch_steps: int,
+    val_epoch_steps: int,
+    batch_szie: int,
+    triplet_margin: float,
     model: torch.nn.Module,
     optimizer: Any,
     train_generator: Callable,
@@ -62,7 +62,6 @@ def fit(
 ):
     train_loss_history_array, train_silouhette_history_array = [], []
     val_loss_history_array, val_recall_history_array = [], []
-    ewma = lambda x, span: pd.DataFrame({"x": x})["x"].ewm(span=span).mean().values
 
     try:
         for epoch in range(dataset_passes):
@@ -73,22 +72,25 @@ def fit(
             model.enable_bert_layers_training()
 
             pbar = tqdm(
-                total=EPOCH_STEPS, desc=f"Training, epoch {epoch}/{dataset_passes}"
+                total=train_epoch_steps,
+                desc=f"Training, epoch {epoch}/{dataset_passes}",
             )
-            for _ in range(EPOCH_STEPS):
-                batch_sample = train_generator(BATCH_SIZE)
+            for _ in range(train_epoch_steps):
+                batch_sample = train_generator(batch_szie)
                 optimizer.zero_grad()
                 train_anchor_proj, train_pos_proj, train_neg_proj = model.forward(
                     batch_sample["anchor"],
                     batch_sample["positive"],
                     batch_sample["negative"],
                 )
-                batch_train_loss = compute_triplet_loss(
+
+                batch_train_loss = hard_triplet_loss(
                     anchor_sample=train_anchor_proj,
                     pos_sample=train_pos_proj,
                     neg_sample=train_neg_proj,
                     distance_metric=l2_distance,
-                    device=device,
+                    margin=triplet_margin,
+                    mining_type="hard",
                 )
                 batch_train_loss.backward()
                 optimizer.step()
@@ -97,7 +99,7 @@ def fit(
 
             # Average Loss per sample
             train_loss_history_array.append(
-                epoch_train_loss / (EPOCH_STEPS * BATCH_SIZE)
+                epoch_train_loss / (train_epoch_steps * batch_szie)
             )
             epoch_train_silouhette = compute_silhouette_score(
                 10,
@@ -131,8 +133,8 @@ def fit(
             epoch_val_loss = 0
             epoch_val_recall = 0
             pbar.close()
-            pbar = tqdm(total=VAL_STEPS, desc="Validation")
-            for _ in range(VAL_STEPS):
+            pbar = tqdm(total=val_epoch_steps, desc="Validation")
+            for _ in range(val_epoch_steps):
                 batch_sample = val_generator(2)
                 with torch.no_grad():
                     val_anchor_proj, val_pos_proj, val_neg_proj = model.forward(
@@ -140,12 +142,13 @@ def fit(
                         batch_sample["positive"],
                         batch_sample["negative"],
                     )
-                    batch_val_loss = compute_triplet_loss(
+                    batch_val_loss = hard_triplet_loss(
                         anchor_sample=val_anchor_proj,
                         pos_sample=val_pos_proj,
                         neg_sample=val_neg_proj,
                         distance_metric=l2_distance,
-                        device=device,
+                        margin=triplet_margin,
+                        mining_type="hard",
                     )
                     epoch_val_loss += batch_val_loss.item()
                     pbar.update(1)
@@ -154,14 +157,19 @@ def fit(
                 anchor2pos_distance = l2_distance(val_anchor_proj, val_pos_proj)
                 anchor2neg_distance = l2_distance(val_anchor_proj, val_neg_proj)
 
-                if anchor2neg_distance > anchor2pos_distance + DELTA:
+                if (
+                    torch.sum(anchor2neg_distance)
+                    > torch.sum(anchor2pos_distance) + DELTA
+                ):
                     epoch_val_recall += 1
             pbar.close()
 
             # Average loss per sample
-            val_loss_history_array.append(epoch_val_loss / (VAL_STEPS * BATCH_SIZE))
+            val_loss_history_array.append(
+                epoch_val_loss / (val_epoch_steps * batch_szie)
+            )
             # Recall per one epoch pass
-            val_recall_history_array.append(epoch_val_recall / VAL_STEPS)
+            val_recall_history_array.append(epoch_val_recall / val_epoch_steps)
 
             clear_output(True)
             plot_metrics(

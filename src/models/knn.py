@@ -17,7 +17,6 @@ class KnnIndex:
         """
         self.to_retrieve = to_retrieve
         self.index = faiss.IndexFlatL2(embeddings.shape[1])
-        self.index.train(embeddings)
         self.index.add(embeddings)
         self.classes_array = classes_array
 
